@@ -13,6 +13,9 @@ abstract class Yoneda[F[_], A] { yo =>
   /** Converts to `F[A]` even without a `Functor` instance for `F` */
   def run: F[A] = apply(a => a)
 
+  /** An alias for `run` */
+  def lower: F[A] = run
+
   /** Converts to `Coyoneda[F,A]` even without a `Functor` instance for `F` */
   def toCoyoneda: Coyoneda.Aux[F,A,A] = Coyoneda(run)(identity[A])
 
@@ -28,18 +31,80 @@ abstract class Yoneda[F[_], A] { yo =>
   }
 }
 
-object Yoneda {
+object Yoneda extends YonedaInstances {
 
-  /** `Yoneda[F,_]` is a functor for any `F` */
+  /** `F[A]` converts to `Yoneda[F,A]` for any functor `F` */
+  def apply[F[_]: Functor, A](fa: F[A]): Yoneda[F, A] = new Yoneda[F, A] {
+    def apply[B](f: A => B) = Functor[F].map(fa)(f)
+  }
+
+  /** An alias for `apply` */
+  def lift[F[_]: Functor, A](fa: F[A]): Yoneda[F, A] = apply(fa)
+
+  type YonedaF[F[_]] = ({type A[α] = Yoneda[F, α]})
+
+  import Isomorphism._
+
+  /** The isomorphism that Yoneda ensures */
+  def iso[F[_]: Functor]: YonedaF[F]#A <~> F =
+    new IsoFunctorTemplate[YonedaF[F]#A, F] {
+      def from[A](fa: F[A]): Yoneda[F, A] = lift(fa)
+      def to[A](fa: Yoneda[F, A]): F[A] = fa.lower
+    }
+
+}
+
+/**
+ * Hierarchical inheritance structure so scalac can resolve otherwise abiguous implicits.
+ */
+
+sealed abstract class YonedaInstances extends YonedaInstances0 {
+  /** `Yoneda[F,_]` has a `Functor` instance for any `F` */
   implicit def yonedaFunctor[F[_]]: Functor[({type λ[α] = Yoneda[F,α]})#λ] =
     new Functor[({type λ[α] = Yoneda[F,α]})#λ] {
       def map[A,B](ya: Yoneda[F,A])(f: A => B) = ya map f
     }
-
-  /** `F[A]` converts to `Yoneda[F,A]` for any functor `F` */
-  def apply[F[_]:Functor,A](fa: F[A]): Yoneda[F, A] = new Yoneda[F, A] {
-    def apply[B](f: A => B) = Functor[F].map(fa)(f)
-  }
-
 }
 
+sealed abstract class YonedaInstances0 extends YonedaInstances1 {
+  /** `Yoneda[F,_]` has an `Order` instance for any `F` */
+  implicit def yonedaOrder[A, F[_]](implicit A: Order[F[A]], F: Functor[F]): Order[Yoneda[F, A]] =
+    new IsomorphismOrder[Yoneda[F, A], F[A]] {
+      def G = A
+      def iso = Yoneda.iso[F].unlift
+    }
+}
+
+sealed abstract class YonedaInstances1 extends YonedaInstances2 {
+  /** `Yoneda[F,_]` has an `Equal` instance for any `F` */
+  implicit def yonedaEqual[A, F[_]](implicit A: Equal[F[A]], F: Functor[F]): Equal[Yoneda[F, A]] =
+    new IsomorphismEqual[Yoneda[F, A], F[A]] {
+      def G = A
+      def iso = Yoneda.iso[F].unlift
+    }
+}
+
+sealed abstract class YonedaInstances2 extends YonedaInstances3 {
+  /** `Yoneda[F,_]` has a `Monad` instance for any `F` */
+  implicit def yonedaMonad[F[_]: Monad]: Monad[({type λ[α] = Yoneda[F, α]})#λ] =
+    new IsomorphismMonad[({type λ[α] = Yoneda[F, α]})#λ, F] {
+      def G = implicitly
+      def iso = Yoneda.iso
+    }
+}
+
+sealed abstract class YonedaInstances3 extends YonedaInstances4 {
+  implicit def yonedaBind[F[_]: Bind]: Bind[({type λ[α] = Yoneda[F, α]})#λ] =
+    new IsomorphismBind[({type λ[α] = Yoneda[F, α]})#λ, F] {
+      def G = implicitly
+      def iso = Yoneda.iso
+    }
+}
+
+sealed abstract class YonedaInstances4 {
+  implicit def yonedaApplicative[F[_]: Applicative]: Applicative[({type λ[α] = Yoneda[F, α]})#λ] =
+    new IsomorphismApplicative[({type λ[α] = Yoneda[F, α]})#λ, F] {
+      def G = implicitly
+      def iso = Yoneda.iso
+    }
+}
